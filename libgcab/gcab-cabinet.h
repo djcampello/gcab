@@ -87,6 +87,11 @@ gboolean           gcab_cabinet_write_simple  (GCabCabinet *cabinet,
                                                gpointer user_data,
                                                GCancellable *cancellable,
                                                GError **error);
+gboolean           gcab_cabinet_decompress    (GCabCabinet *cabinet,
+                                               GCabFileCallback file_callback,
+                                               gpointer user_data,
+                                               GCancellable *cancellable,
+                                               GError **error);
 gboolean           gcab_cabinet_extract       (GCabCabinet *cabinet,
                                                GFile *path,
                                                GCabFileCallback file_callback,

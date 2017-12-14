@@ -248,6 +248,62 @@ _compute_checksum_for_file (GFile *file, GError **error)
 }
 
 static void
+gcab_test_cabinet_decompress_func (void)
+{
+    gboolean ret;
+    g_autofree gchar *fn = NULL;
+    g_autoptr(GCabCabinet) cabinet = NULL;
+    g_autoptr(GError) error = NULL;
+    g_autoptr(GFile) file = NULL;
+    g_autoptr(GInputStream) in = NULL;
+
+    /* decompress to memory */
+    fn = gcab_test_get_filename ("test-none.cab");
+    g_assert (fn != NULL);
+    file = g_file_new_for_path (fn);
+    in = G_INPUT_STREAM (g_file_read (file, NULL, &error));
+    g_assert_no_error (error);
+    g_assert (in != NULL);
+    cabinet = gcab_cabinet_new ();
+    ret = gcab_cabinet_load (cabinet, in, NULL, &error);
+    g_assert_no_error (error);
+    g_assert (ret);
+    ret = gcab_cabinet_decompress (cabinet, NULL, NULL, NULL, &error);
+    g_assert_no_error (error);
+    g_assert (ret);
+
+    GPtrArray *folders = gcab_cabinet_get_folders (cabinet);
+    g_assert_cmpint (folders->len, ==, 1);
+    GCabFolder *folder = g_ptr_array_index (folders, 0);
+    g_autoptr(GSList) cabfiles = gcab_folder_get_files (folder);
+    for (GSList *l = cabfiles; l != NULL; l = l->next) {
+        GCabFile *cabfile = GCAB_FILE (l->data);
+        GBytes *bytes = NULL;
+        const gchar *checksum = NULL;
+        struct {
+            const gchar *fn;
+            const gchar *checksum;
+        } files[] = {
+            { "test.sh",            "82b4415cf30efc9b5877e366475d652f263c0ced" },
+            { "test.txt",           "decc67ff4a11acd93430cbb18c7bbddd00abf4fa" },
+            { NULL,                 NULL }
+        };
+        for (guint i = 0; files[i].fn != NULL; i++) {
+            if (g_strcmp0 (gcab_file_get_name (cabfile), files[i].fn) == 0) {
+                checksum = files[i].checksum;
+                break;
+            }
+        }
+        if (checksum == NULL)
+            g_error ("failed to find hash for %s", gcab_file_get_name (cabfile));
+        bytes = gcab_file_get_bytes (cabfile);
+        g_assert (bytes != NULL);
+        g_autofree gchar *csum = g_compute_checksum_for_bytes (G_CHECKSUM_SHA1, bytes);
+        g_assert_cmpstr (csum, ==, checksum);
+    }
+}
+
+static void
 gcab_test_cabinet_load_func (void)
 {
     struct {
@@ -489,6 +545,7 @@ main (int argc, char **argv)
     g_test_add_func ("/GCab/cabinet{error-cves}", gcab_test_cabinet_error_cves_func);
     g_test_add_func ("/GCab/cabinet{load}", gcab_test_cabinet_load_func);
     g_test_add_func ("/GCab/cabinet{write}", gcab_test_cabinet_write_func);
+    g_test_add_func ("/GCab/cabinet{decompress}", gcab_test_cabinet_decompress_func);
     g_test_add_func ("/GCab/cabinet{signature}", gcab_test_cabinet_signature_func);
     return g_test_run ();
 }

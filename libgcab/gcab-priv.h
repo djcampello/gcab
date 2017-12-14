@@ -50,6 +50,7 @@ guint32          gcab_file_get_usize                 (GCabFile *file);
 GFile           *gcab_file_get_gfile                 (GCabFile *file);
 cfile_t         *gcab_file_get_cfile                 (GCabFile *file);
 void             gcab_file_add_attribute             (GCabFile *file, guint32 attribute);
+void             gcab_file_set_bytes                 (GCabFile *file, GBytes *bytes);
 
 gsize            gcab_folder_get_ndatablocks         (GCabFolder *folder);
 gboolean         gcab_folder_extract                 (GCabFolder *self,
@@ -57,6 +58,12 @@ gboolean         gcab_folder_extract                 (GCabFolder *self,
                                                       guint8 res_data,
                                                       GCabFileCallback file_callback,
                                                       GFileProgressCallback progress_callback,
+                                                      gpointer callback_data,
+                                                      GCancellable *cancellable,
+                                                      GError **error);
+gboolean         gcab_folder_decompress              (GCabFolder *self,
+                                                      guint8 res_data,
+                                                      GCabFileCallback file_callback,
                                                       gpointer callback_data,
                                                       GCancellable *cancellable,
                                                       GError **error);

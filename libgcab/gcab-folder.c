@@ -54,7 +54,7 @@ struct _GCabFolder
     gint comptype;
     GByteArray *reserved;
     cfolder_t *cfolder;
-    GInputStream *stream;
+    GDataInputStream *stream;
 };
 
 enum {
@@ -349,7 +349,12 @@ gcab_folder_new_steal_cfolder (cfolder_t **cfolder, GInputStream *stream)
     GCabFolder *self = g_object_new (GCAB_TYPE_FOLDER,
                                      "comptype", (*cfolder)->typecomp,
                                      NULL);
-    self->stream = g_object_ref (stream);
+
+    /* create LE-adjusted stream */
+    self->stream = g_data_input_stream_new (stream);
+    g_data_input_stream_set_byte_order (self->stream, G_DATA_STREAM_BYTE_ORDER_LITTLE_ENDIAN);
+    g_filter_input_stream_set_close_base_stream (G_FILTER_INPUT_STREAM (self->stream), FALSE);
+
     self->cfolder = g_steal_pointer (cfolder);
 
     return self;
@@ -392,7 +397,6 @@ gcab_folder_extract (GCabFolder *self,
 {
     GError *my_error = NULL;
     gboolean success = FALSE;
-    g_autoptr(GDataInputStream) data = NULL;
     g_autoptr(GFileOutputStream) out = NULL;
     GSList *f = NULL;
     g_autoptr(GSList) files = NULL;
@@ -402,11 +406,7 @@ gcab_folder_extract (GCabFolder *self,
     /* never loaded from a stream */
     g_assert (self->cfolder != NULL);
 
-    data = g_data_input_stream_new (self->stream);
-    g_data_input_stream_set_byte_order (data, G_DATA_STREAM_BYTE_ORDER_LITTLE_ENDIAN);
-    g_filter_input_stream_set_close_base_stream (G_FILTER_INPUT_STREAM (data), FALSE);
-
-    if (!g_seekable_seek (G_SEEKABLE (data), self->cfolder->offsetdata, G_SEEK_SET, cancellable, error))
+    if (!g_seekable_seek (G_SEEKABLE (self->stream), self->cfolder->offsetdata, G_SEEK_SET, cancellable, error))
         goto end;
 
     files = g_slist_sort (g_slist_copy (self->files), (GCompareFunc)sort_by_offset);
@@ -459,7 +459,7 @@ gcab_folder_extract (GCabFolder *self,
 
         /* let's rewind if need be */
         if (uoffset < nubytes) {
-            if (!g_seekable_seek (G_SEEKABLE (data), self->cfolder->offsetdata,
+            if (!g_seekable_seek (G_SEEKABLE (self->stream), self->cfolder->offsetdata,
                                   G_SEEK_SET, cancellable, error))
                 goto end;
             bzero(&cdata, sizeof(cdata));
@@ -470,7 +470,7 @@ gcab_folder_extract (GCabFolder *self,
             if ((nubytes + cdata.nubytes) <= uoffset) {
                 nubytes += cdata.nubytes;
                 if (!cdata_read (&cdata, res_data, self->comptype,
-                                 data, cancellable, error))
+                                 self->stream, cancellable, error))
                     goto end;
                 continue;
             } else {
@@ -485,6 +485,87 @@ gcab_folder_extract (GCabFolder *self,
                 uoffset += count;
             }
         }
+    }
+
+    success = TRUE;
+
+end:
+    cdata_finish (&cdata, NULL);
+
+    return success;
+}
+
+G_GNUC_INTERNAL gboolean
+gcab_folder_decompress (GCabFolder *self,
+                        guint8 res_data,
+                        GCabFileCallback file_callback,
+                        gpointer callback_data,
+                        GCancellable *cancellable,
+                        GError **error)
+{
+    gboolean success = FALSE;
+    g_autoptr(GFileOutputStream) out = NULL;
+    GSList *f = NULL;
+    g_autoptr(GSList) files = NULL;
+    cdata_t cdata = { 0, };
+    guint32 nubytes = 0;
+
+    /* never loaded from a stream */
+    g_assert (self->cfolder != NULL);
+
+    if (!g_seekable_seek (G_SEEKABLE (self->stream), self->cfolder->offsetdata, G_SEEK_SET, cancellable, error))
+        goto end;
+
+    files = g_slist_sort (g_slist_copy (self->files), (GCompareFunc)sort_by_offset);
+
+    for (f = files; f != NULL; f = f->next) {
+        GCabFile *file = f->data;
+
+        if (file_callback && !file_callback (file, callback_data))
+            continue;
+
+        g_autoptr(GMemoryOutputStream) out2 = NULL;
+        out2 = G_MEMORY_OUTPUT_STREAM (g_memory_output_stream_new_resizable ());
+        if (!out2)
+            goto end;
+
+        guint32 usize = gcab_file_get_usize (file);
+        guint32 uoffset = gcab_file_get_uoffset (file);
+
+        /* let's rewind if need be */
+        if (uoffset < nubytes) {
+            if (!g_seekable_seek (G_SEEKABLE (self->stream), self->cfolder->offsetdata,
+                                  G_SEEK_SET, cancellable, error))
+                goto end;
+            bzero(&cdata, sizeof(cdata));
+            nubytes = 0;
+        }
+
+        while (usize > 0) {
+            if ((nubytes + cdata.nubytes) <= uoffset) {
+                nubytes += cdata.nubytes;
+                if (!cdata_read (&cdata, res_data, self->comptype,
+                                 self->stream, cancellable, error))
+                    goto end;
+                continue;
+            } else {
+                gsize offset = gcab_file_get_uoffset (file) > nubytes ?
+                    gcab_file_get_uoffset (file) - nubytes : 0;
+                const void *p = &cdata.out[offset];
+                gsize count = MIN (usize, cdata.nubytes - offset);
+                if (!g_output_stream_write_all (G_OUTPUT_STREAM (out2), p, count,
+                                                NULL, cancellable, error))
+                    goto end;
+                usize -= count;
+                uoffset += count;
+            }
+        }
+
+        /* steal as a blob */
+        if (!g_output_stream_close (G_OUTPUT_STREAM (out2), cancellable, error))
+            goto end;
+        g_autoptr(GBytes) bytes_tmp = g_memory_output_stream_steal_as_bytes (out2);
+        gcab_file_set_bytes (file, bytes_tmp);
     }
 
     success = TRUE;

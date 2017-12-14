@@ -45,6 +45,7 @@ struct _GCabFile
 
     gchar *extract_name;
     GFile *file;
+    GBytes *bytes;
     cfile_t *cfile;
 };
 
@@ -53,6 +54,7 @@ enum {
 
     PROP_NAME,
     PROP_FILE,
+    PROP_BYTES,
 };
 
 G_DEFINE_TYPE (GCabFile, gcab_file, G_TYPE_OBJECT);
@@ -69,6 +71,8 @@ gcab_file_finalize (GObject *object)
 
     if (self->file != NULL)
         g_object_unref (self->file);
+    if (self->bytes != NULL)
+        g_bytes_unref (self->bytes);
     cfile_free (self->cfile);
     g_free (self->extract_name);
 
@@ -96,6 +100,14 @@ gcab_file_set_name (GCabFile *self, const gchar *name)
     self->cfile->name = fname;
 }
 
+G_GNUC_INTERNAL void
+gcab_file_set_bytes (GCabFile *self, GBytes *bytes)
+{
+    if (self->bytes != NULL)
+        g_bytes_unref (self->bytes);
+    self->bytes = g_bytes_ref (bytes);
+}
+
 static void
 gcab_file_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
 {
@@ -108,6 +120,9 @@ gcab_file_set_property (GObject *object, guint prop_id, const GValue *value, GPa
         break;
     case PROP_FILE:
         self->file = g_value_dup_object (value);
+        break;
+    case PROP_BYTES:
+        gcab_file_set_bytes (self, g_value_get_boxed (value));
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -127,6 +142,9 @@ gcab_file_get_property (GObject *object, guint prop_id, GValue *value, GParamSpe
         break;
     case PROP_FILE:
         g_value_set_object (value, self->file);
+        break;
+    case PROP_BYTES:
+        g_value_set_boxed (value, self->bytes);
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -152,6 +170,11 @@ gcab_file_class_init (GCabFileClass *klass)
         g_param_spec_object ("file", "file", "file", G_TYPE_FILE,
                              G_PARAM_READWRITE |
                              G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property (object_class, PROP_BYTES,
+        g_param_spec_boxed ("bytes", "bytes", "bytes", G_TYPE_BYTES,
+                            G_PARAM_READWRITE |
+                            G_PARAM_STATIC_STRINGS));
 }
 
 /**
@@ -342,6 +365,26 @@ gcab_file_get_file (GCabFile *self)
 }
 
 /**
+ * gcab_file_get_bytes:
+ * @file: a #GCabFile
+ *
+ * Get the #GFile associated with @file.
+ *
+ * If @file is from an existing cabinet, the fuction will return
+ * %NULL.
+ *
+ * Returns: (transfer none): the associated #GBytes or %NULL
+ *
+ * Since: 1.0
+ **/
+GBytes *
+gcab_file_get_bytes (GCabFile *self)
+{
+    g_return_val_if_fail (GCAB_IS_FILE (self), NULL);
+    return self->bytes;
+}
+
+/**
  * gcab_file_new_with_file:
  * @name: name of the file within the cabinet
  * @file: a #GFile to be added to the cabinet
@@ -361,6 +404,30 @@ gcab_file_new_with_file (const gchar *name, GFile *file)
                                    "file", file,
                                    NULL);
     self->cfile = g_new0 (cfile_t, 1);
+    gcab_file_set_name (self, name);
+    return self;
+}
+
+/**
+ * gcab_file_new_with_bytes:
+ * @name: name of the file within the cabinet
+ * @bytes: a #GBytes to be added to the cabinet
+ *
+ * Create a #GCabFile from a given #GBytes.
+ *
+ * Returns: a new #GCabFile
+ *
+ * Since: 1.0
+ **/
+GCabFile *
+gcab_file_new_with_bytes (const gchar *name, GBytes *bytes)
+{
+    g_return_val_if_fail (name != NULL, NULL);
+    g_return_val_if_fail (G_IS_FILE (bytes), NULL);
+
+    GCabFile *self = g_object_new (GCAB_TYPE_FILE, NULL);
+    self->cfile = g_new0 (cfile_t, 1);
+    self->bytes = g_bytes_ref (bytes);
     gcab_file_set_name (self, name);
     return self;
 }

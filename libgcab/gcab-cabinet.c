@@ -532,6 +532,50 @@ gcab_cabinet_extract (GCabCabinet *self,
 }
 
 /**
+ * gcab_cabinet_decompress:
+ * @cabinet: a #GCabCabinet
+ * @file_callback: (allow-none) (scope call) (closure user_data): an optional #GCabFile callback,
+ *     return %FALSE to skip files.
+ * @user_data: (closure): callback data
+ * @cancellable: (allow-none): optional #GCancellable object, %NULL to ignore
+ * @error: (allow-none): #GError to set on error, or %NULL
+ *
+ * Decompresses files to memory. The data blob for each file can be retrieved
+ * using gcab_file_get_bytes().
+ *
+ * Returns: %TRUE on success.
+ **/
+gboolean
+gcab_cabinet_decompress (GCabCabinet *self,
+                         GCabFileCallback file_callback,
+                         gpointer user_data,
+                         GCancellable *cancellable,
+                         GError **error)
+{
+    g_return_val_if_fail (GCAB_IS_CABINET (self), FALSE);
+    g_return_val_if_fail (!cancellable || G_IS_CANCELLABLE (cancellable), FALSE);
+    g_return_val_if_fail (!error || *error == NULL, FALSE);
+
+    /* never loaded from a stream */
+    if (self->cheader == NULL) {
+        g_set_error (error, GCAB_ERROR, GCAB_ERROR_FAILED,
+                     "Cabinet has not been loaded");
+        return FALSE;
+    }
+
+    for (guint i = 0; i < self->folders->len; ++i) {
+        GCabFolder *folder = g_ptr_array_index (self->folders, i);
+        if (!gcab_folder_decompress (folder, self->cheader->res_data,
+                                     file_callback, user_data,
+                                     cancellable, error)) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+/**
  * gcab_cabinet_extract_simple:
  * @cabinet: a #GCabCabinet
  * @path: the path to extract files
