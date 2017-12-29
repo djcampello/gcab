@@ -29,6 +29,7 @@
 
 typedef struct {
     gboolean    verbose;
+    guint32     max_file_size;
     GFile *     cwd;
 } GCabSelf;
 
@@ -50,6 +51,16 @@ file_callback (GCabFile *cabfile, gpointer data)
 
     if (!self->verbose)
         return TRUE;
+
+    /* too large */
+    if (self->max_file_size > 0 &&
+        gcab_file_get_size (cabfile) > self->max_file_size) {
+        g_autofree gchar *sz_str = NULL;
+        sz_str = g_format_size_full (self->max_file_size, G_FORMAT_SIZE_LONG_FORMAT);
+        g_printerr ("skipping %s as larger than maximum size %s\n",
+                    gcab_file_get_name (cabfile), sz_str);
+        return FALSE;
+    }
 
     if (file) {
         g_autofree gchar *path =  g_file_get_relative_path (self->cwd, file);
@@ -135,6 +146,7 @@ main (int argc, char *argv[])
         { "directory", 'C', 0, G_OPTION_ARG_FILENAME, &change, N_("Change to directory DIR"), N_("DIR") },
         { "zip", 'z', 0, G_OPTION_ARG_NONE, &compress, N_("Use zip compression"), NULL },
         { "nopath", 'n', 0, G_OPTION_ARG_NONE, &nopath, N_("Do not include path"), NULL },
+        { "max-file-size", '\0', 0, G_OPTION_ARG_INT, &self->max_file_size, N_("Maximum size of each decompressed file"), NULL },
         { "space", 's', G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_INT, &space, N_("Reserve space in cabinet for signing (e.g. -s 6144 reserves 6K bytes)"), NULL },
         { G_OPTION_REMAINING, '\0', 0, G_OPTION_ARG_FILENAME_ARRAY, &args, NULL, N_("FILE INPUT_FILES...") },
         { NULL }
