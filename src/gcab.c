@@ -30,6 +30,7 @@
 typedef struct {
     gboolean    verbose;
     guint32     max_file_size;
+    guint32     max_archive_size;
     GFile *     cwd;
 } GCabSelf;
 
@@ -147,6 +148,7 @@ main (int argc, char *argv[])
         { "zip", 'z', 0, G_OPTION_ARG_NONE, &compress, N_("Use zip compression"), NULL },
         { "nopath", 'n', 0, G_OPTION_ARG_NONE, &nopath, N_("Do not include path"), NULL },
         { "max-file-size", '\0', 0, G_OPTION_ARG_INT, &self->max_file_size, N_("Maximum size of each decompressed file"), NULL },
+        { "max-archive-size", '\0', 0, G_OPTION_ARG_INT, &self->max_archive_size, N_("Maximum size compressed archive"), NULL },
         { "space", 's', G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_INT, &space, N_("Reserve space in cabinet for signing (e.g. -s 6144 reserves 6K bytes)"), NULL },
         { G_OPTION_REMAINING, '\0', 0, G_OPTION_ARG_FILENAME_ARRAY, &args, NULL, N_("FILE INPUT_FILES...") },
         { NULL }
@@ -208,6 +210,15 @@ individual files from the archive.\
         if (!gcab_cabinet_load (cabinet, in, cancellable, &error)) {
             g_printerr ("%s %s: %s\n", _("Error reading"), args[0], error->message);
             return EXIT_FAILURE;
+        }
+        if (self->max_archive_size > 0 &&
+            gcab_cabinet_get_size (cabinet) > self->max_archive_size) {
+                g_autofree gchar *sz_str = NULL;
+                sz_str = g_format_size_full (self->max_archive_size, G_FORMAT_SIZE_LONG_FORMAT);
+                g_printerr ("%s: %s\n",
+                            _("Cannot open file as larger than maximum size"),
+                            sz_str);
+                return EXIT_FAILURE;
         }
 
         if (list || list_details) {
