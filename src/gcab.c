@@ -27,19 +27,32 @@
 #include <locale.h>
 #include <glib/gi18n.h>
 
-int verbose = 0;
+typedef struct {
+    gboolean    verbose;
+    GFile *     cwd;
+} GCabSelf;
+
+static void
+gcab_self_destroy (GCabSelf *self)
+{
+    if (self->cwd != NULL)
+        g_object_unref (self->cwd);
+    g_free (self);
+}
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(GCabSelf, gcab_self_destroy)
 
 static gboolean
 file_callback (GCabFile *cabfile, gpointer data)
 {
+    GCabSelf *self = (GCabSelf *) data;
     GFile *file = gcab_file_get_file (cabfile);
-    GFile *cwd = G_FILE (data);
 
-    if (!verbose)
+    if (!self->verbose)
         return TRUE;
 
     if (file) {
-        g_autofree gchar *path =  g_file_get_relative_path (cwd, file);
+        g_autofree gchar *path =  g_file_get_relative_path (self->cwd, file);
         if (!path)
             path = g_file_get_parse_name (file);
         g_print ("%s\n", path);
@@ -110,9 +123,10 @@ main (int argc, char *argv[])
     gboolean create = FALSE;
     gboolean extract = FALSE;
     gboolean dump_reserved = FALSE;
+    g_autoptr(GCabSelf) self = g_new0 (GCabSelf, 1);
     GOptionEntry entries[] = {
         { "version", 0, 0, G_OPTION_ARG_NONE, &version, N_("Print program version"), NULL },
-        { "verbose", 'v', 0, G_OPTION_ARG_NONE, &verbose, N_("Be verbose"), NULL },
+        { "verbose", 'v', 0, G_OPTION_ARG_NONE, &self->verbose, N_("Be verbose"), NULL },
         { "create", 'c', 0, G_OPTION_ARG_NONE, &create, N_("Create archive"), NULL },
         { "extract", 'x', 0, G_OPTION_ARG_NONE, &extract, N_("Extract all files"), NULL },
         { "dump-reserved", 'D', 0, G_OPTION_ARG_NONE, &dump_reserved, N_("Dump reserved and extra data"), NULL },
@@ -168,7 +182,6 @@ individual files from the archive.\
     g_autoptr(GCabCabinet) cabinet = gcab_cabinet_new ();
     g_autoptr(GCabFolder) folder = NULL;
     g_autoptr(GCancellable) cancellable = g_cancellable_new ();
-    g_autoptr(GFile) cwd = NULL;
     g_autoptr(GFile) outputfile = NULL;
     g_autoptr(GOutputStream) output = NULL;
 
@@ -216,7 +229,7 @@ individual files from the archive.\
             if (change == NULL)
                 change = g_get_current_dir ();
             file2 = g_file_new_for_path (change);
-            if (!gcab_cabinet_extract (cabinet, file2, file_callback, NULL, NULL, cancellable, &error)) {
+            if (!gcab_cabinet_extract (cabinet, file2, file_callback, NULL, self, cancellable, &error)) {
                 g_printerr ("%s: %s\n", _("Error during extraction"), error->message);
                 return EXIT_FAILURE;
             }
@@ -281,7 +294,7 @@ individual files from the archive.\
         return EXIT_FAILURE;
     }
 
-    cwd = g_file_new_for_commandline_arg (".");
+    self->cwd = g_file_new_for_commandline_arg (".");
     if (!gcab_cabinet_add_folder (cabinet, folder, &error)) {
         g_printerr ("%s %s: %s\n", _("Cannot add folder to cab file"), args[0], error->message);
         return EXIT_FAILURE;
@@ -290,7 +303,7 @@ individual files from the archive.\
     if (!gcab_cabinet_write (cabinet, output,
                              file_callback,
                              NULL,
-                             cwd,
+                             self,
                              NULL,
                              &error)) {
         g_printerr ("%s %s: %s\n", _("Cannot write cab file"), args[0], error->message);
